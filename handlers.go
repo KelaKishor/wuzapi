@@ -46,6 +46,23 @@ func (v Values) Get(key string) string {
 	return v.m[key]
 }
 
+func (s *server) ApiProcessKill() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		s.respondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"code":    http.StatusOK,
+			"success": true,
+			"details": "Server process is being terminated...",
+		})
+
+		// Thoda delay taaki response client tak pahunch jaye
+		go func() {
+			time.Sleep(1 * time.Second)
+			os.Exit(1)
+		}()
+	}
+}
+
 func (s *server) GetHealth() http.HandlerFunc {
 	type HealthResponse struct {
 		Status            string                 `json:"status"`
@@ -7179,17 +7196,17 @@ func (s *server) GetHistory() http.HandlerFunc {
 
 // save outgoing message to history
 func (s *server) saveOutgoingMessageToHistory(userID, chatJID, messageID, messageType, textContent, mediaLink string, historyLimit int) {
-	if historyLimit > 0 {
-		err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", "")
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to save outgoing message to history")
-		} else {
-			err = s.trimMessageHistory(userID, chatJID, historyLimit)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to trim message history")
-			}
-		}
-	}
+	// if historyLimit > 0 {
+	// 	err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", "")
+	// 	if err != nil {
+	// 		log.Error().Err(err).Msg("Failed to save outgoing message to history")
+	// 	} else {
+	// 		err = s.trimMessageHistory(userID, chatJID, historyLimit)
+	// 		if err != nil {
+	// 			log.Error().Err(err).Msg("Failed to trim message history")
+	// 		}
+	// 	}
+	// }
 }
 
 // Configure HMAC

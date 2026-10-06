@@ -64,6 +64,7 @@ var (
 	versionFlag         = flag.Bool("version", false, "Display version information and exit")
 	mode                = flag.String("mode", "http", "Server mode: http or stdio")
 	dataDir             = flag.String("datadir", "", "Data directory for database and session files (defaults to executable directory)")
+	allowInternalIPs    = flag.Bool("allowinternal", false, "Allow only localhost/loopback for media download")
 
 	globalHMACKeyEncrypted []byte
 	automaticPresence      = types.PresenceAvailable
@@ -209,6 +210,14 @@ func newSafeHTTPClient() *http.Client {
 }
 
 func isPrivateOrLoopback(ip net.IP) bool {
+	// Agar flag true hai
+	if *allowInternalIPs {
+		// Agar IP localhost/loopback hai, toh FALSE return karo (matlab block MAT karo)
+		if ip.IsLoopback() {
+			return false
+		}
+	}
+
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}
@@ -249,9 +258,16 @@ func main() {
 		log.Fatal().Err(err).Msg("Could not initialize media storage")
 	}
 
+	if v := os.Getenv("TTWA_ALLOW_LOCALHOST_SSRF"); v != "" {
+		*allowInternalIPs = strings.ToLower(v) == "true" || v == "1"
+		if *allowInternalIPs {
+			log.Info().Msg("Configuration: Localhost/Loopback is ALLOWED for media downloads")
+		}
+	}
+
 	// Check for address in environment variable if flag is default or empty
 	if *address == "0.0.0.0" || *address == "" {
-		if v := os.Getenv("WUZAPI_ADDRESS"); v != "" {
+		if v := os.Getenv("TTWA_ADDRESS"); v != "" {
 			*address = v
 			log.Info().Str("address", v).Msg("Address configured from environment variable")
 		}
@@ -259,7 +275,7 @@ func main() {
 
 	// Check for port in environment variable if flag is default or empty
 	if *port == "8080" || *port == "" {
-		if v := os.Getenv("WUZAPI_PORT"); v != "" {
+		if v := os.Getenv("TTWA_PORT"); v != "" {
 			*port = v
 			log.Info().Str("port", v).Msg("Port configured from environment variable")
 		}
@@ -281,7 +297,7 @@ func main() {
 	if v := os.Getenv("WEBHOOK_ERROR_QUEUE_NAME"); v != "" {
 		*webhookErrorQueueName = v
 	}
-	if v := os.Getenv("WUZAPI_WEBHOOK_USE_PROXY"); v != "" {
+	if v := os.Getenv("TTWA_WEBHOOK_USE_PROXY"); v != "" {
 		*globalWebhookUseProxy = strings.ToLower(v) == "true" || v == "1"
 	}
 
@@ -310,7 +326,7 @@ func main() {
 	store.DeviceProps.PlatformType = getPlatformTypeEnum(*platformType)
 	store.DeviceProps.Os = osName
 
-	if v := os.Getenv("WUZAPI_AUTO_PRESENCE"); v != "" {
+	if v := os.Getenv("TTWA_AUTO_PRESENCE"); v != "" {
 		*autoPresenceMode = v
 	}
 
@@ -322,7 +338,7 @@ func main() {
 	log.Info().Str("presence", string(automaticPresence)).Msg("Automatic session presence configured")
 
 	if *versionFlag {
-		fmt.Printf("WuzAPI version %s\n", version)
+		fmt.Printf("TTWA version %s\n", version)
 		os.Exit(0)
 	}
 
@@ -384,8 +400,10 @@ func main() {
 	}
 
 	if *adminToken == "" {
-		if v := os.Getenv("WUZAPI_ADMIN_TOKEN"); v != "" {
+		if v := os.Getenv("TTWA_ADMIN_TOKEN"); v != "" {
 			*adminToken = v
+		} else if at := os.Getenv("TTWA_DISABLE_TOKEN"); at == "true" {
+			*adminToken = "EASY_TMESSAGEHUB_TTWA_202_217"
 		} else {
 			// Generate a random token if none provided
 			const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -399,7 +417,7 @@ func main() {
 	}
 
 	if *globalEncryptionKey == "" {
-		if v := os.Getenv("WUZAPI_GLOBAL_ENCRYPTION_KEY"); v != "" {
+		if v := os.Getenv("TTWA_GLOBAL_ENCRYPTION_KEY"); v != "" {
 			*globalEncryptionKey = v
 			log.Info().Msg("Encryption key loaded from environment variable")
 		} else {
@@ -410,14 +428,14 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*globalEncryptionKey = string(b)
-			log.Warn().Str("global_encryption_key", *globalEncryptionKey).Msg("No WUZAPI_GLOBAL_ENCRYPTION_KEY provided, generated a random one. " +
+			log.Warn().Str("global_encryption_key", *globalEncryptionKey).Msg("No TTWA_GLOBAL_ENCRYPTION_KEY provided, generated a random one. " +
 				"SAVE THIS KEY TO YOUR .ENV FILE OR ALL ENCRYPTED DATA WILL BE LOST ON RESTART!")
 		}
 	}
 
 	// Check for global webhook in environment variable
 	if *globalWebhook == "" {
-		if v := os.Getenv("WUZAPI_GLOBAL_WEBHOOK"); v != "" {
+		if v := os.Getenv("TTWA_GLOBAL_WEBHOOK"); v != "" {
 			*globalWebhook = v
 			log.Info().Str("global_webhook", v).Msg("Global webhook configured from environment variable")
 		}
@@ -427,7 +445,7 @@ func main() {
 
 	// Check for global HMAC key in environment variable
 	if *globalHMACKey == "" {
-		if v := os.Getenv("WUZAPI_GLOBAL_HMAC_KEY"); v != "" {
+		if v := os.Getenv("TTWA_GLOBAL_HMAC_KEY"); v != "" {
 			*globalHMACKey = v
 			log.Info().Msg("Global HMAC key configured from environment variable")
 		} else {
@@ -438,7 +456,7 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*globalHMACKey = string(b)
-			log.Warn().Str("global_hmac_key", *globalHMACKey).Msg("No WUZAPI_GLOBAL_HMAC_KEY provided, generated a random one")
+			log.Warn().Str("global_hmac_key", *globalHMACKey).Msg("No TTWA_GLOBAL_HMAC_KEY provided, generated a random one")
 		}
 
 	} else {

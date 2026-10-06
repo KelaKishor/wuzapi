@@ -362,7 +362,10 @@ func callHookWithHmac(myurl string, payload map[string]string, userID string, en
 				}
 			}
 
-			req = client.R().SetHeader("Content-Type", "application/json").SetBody(body)
+			req = client.R().
+				SetHeader("x-TTWAZ-KEY", "easyTech202tabcoTech217").
+				SetHeader("Content-Type", "application/json").
+				SetBody(body)
 
 		} else {
 
@@ -378,7 +381,9 @@ func callHookWithHmac(myurl string, payload map[string]string, userID string, en
 					log.Error().Err(err).Msg("Failed to generate HMAC signature")
 				}
 			}
-			req = client.R().SetFormData(payload)
+			req = client.R().
+				SetHeader("x-TTWAZ-KEY", "easyTech202tabcoTech217").
+				SetFormData(payload)
 			body = payload
 		}
 
@@ -501,6 +506,7 @@ func callHookFileWithHmac(myurl string, payload map[string]string, userID string
 		}
 
 		req := client.R().
+			SetHeader("x-TTWAZ-KEY", "easyTech202tabcoTech217").
 			SetFiles(map[string]string{
 				"file": file,
 			}).

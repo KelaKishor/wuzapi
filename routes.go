@@ -57,6 +57,7 @@ func (s *server) routes() {
 	adminRoutes.Handle("/users/{id}", s.EditUser()).Methods("PUT")
 	adminRoutes.Handle("/users/{id}", s.DeleteUser()).Methods("DELETE")
 	adminRoutes.Handle("/users/{id}/full", s.DeleteUserComplete()).Methods("DELETE")
+	adminRoutes.Handle("/reset", s.ApiProcessKill()).Methods("POST")
 
 	c := alice.New()
 	c = c.Append(s.authalice)
