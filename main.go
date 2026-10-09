@@ -338,7 +338,7 @@ func main() {
 	automaticPresence = configuredPresence
 	log.Info().Str("presence", string(automaticPresence)).Msg("Automatic session presence configured")
 
-	if v := os.Getenv("WUZAPI_PROXY_POOL_FALLBACK"); v != "" {
+	if v := os.Getenv("TTWA_PROXY_POOL_FALLBACK"); v != "" {
 		*poolFallbackMode = v
 	}
 	configuredFallback, err := parseProxyPoolFallback(*poolFallbackMode)
