@@ -65,6 +65,8 @@ var (
 	versionFlag         = flag.Bool("version", false, "Display version information and exit")
 	mode                = flag.String("mode", "http", "Server mode: http or stdio")
 	dataDir             = flag.String("datadir", "", "Data directory for database and session files (defaults to executable directory)")
+
+	socketRecoveryEnabled = flag.Bool("socketrecovery", true, "Recover sessions after closed socket send errors")
 	allowInternalIPs    = flag.Bool("allowinternal", false, "Allow only localhost/loopback for media download")
 
 	globalHMACKeyEncrypted []byte
@@ -142,6 +144,7 @@ func signalKill(userID string) {
 		log.Debug().Str("userID", userID).Msg("signalKill: no kill channel registered (already cleaned up?)")
 		return
 	}
+	clientManager.stopSocketRecovery(userID, true)
 	select {
 	case ch <- true:
 	default:
@@ -337,6 +340,22 @@ func main() {
 	}
 	automaticPresence = configuredPresence
 	log.Info().Str("presence", string(automaticPresence)).Msg("Automatic session presence configured")
+
+	if v := os.Getenv("WUZAPI_SOCKET_RECOVERY"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid WUZAPI_SOCKET_RECOVERY value")
+		}
+		*socketRecoveryEnabled = enabled
+	}
+
+	if v := os.Getenv("WUZAPI_SOCKET_RECOVERY"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid WUZAPI_SOCKET_RECOVERY value")
+		}
+		*socketRecoveryEnabled = enabled
+	}
 
 	if v := os.Getenv("TTWA_PROXY_POOL_FALLBACK"); v != "" {
 		*poolFallbackMode = v
