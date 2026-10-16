@@ -683,7 +683,7 @@ func (s *server) GetQR() http.HandlerFunc {
 			}
 		}
 
-		log.Info().Str("instance", txtid).Str("qrcode", code).Msg("Get QR successful")
+		log.Info().Str("instance", txtid).Msg("Get QR successful")
 		response := map[string]interface{}{
 			"QRCode":         fmt.Sprintf("%s", code),
 			"passkeyPending": false,
@@ -3544,7 +3544,7 @@ func (s *server) GetUser() http.HandlerFunc {
 		if err != nil {
 			msg := fmt.Sprintf("Failed to get user info: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -4691,7 +4691,7 @@ func (s *server) ListGroups() http.HandlerFunc {
 		if err != nil {
 			msg := fmt.Sprintf("failed to get group list: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -4745,7 +4745,7 @@ func (s *server) GetGroupInfo() http.HandlerFunc {
 		if err != nil {
 			msg := fmt.Sprintf("Failed to get group info: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -4808,7 +4808,7 @@ func (s *server) GetGroupInviteLink() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("Failed to get group invite link")
 			msg := fmt.Sprintf("Failed to get group invite link: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -4859,7 +4859,7 @@ func (s *server) GroupJoin() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to join group")
 			msg := fmt.Sprintf("failed to join group: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -4880,8 +4880,9 @@ func (s *server) GroupJoin() http.HandlerFunc {
 func (s *server) CreateGroup() http.HandlerFunc {
 
 	type createGroupStruct struct {
-		Name         string   `json:"name"`
-		Participants []string `json:"participants"`
+		Name          string   `json:"name"`
+		Participants  []string `json:"participants"`
+		MemberAddMode string   `json:"memberaddmode"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -4922,9 +4923,17 @@ func (s *server) CreateGroup() http.HandlerFunc {
 			}
 		}
 
+		// Optional: when empty, whatsmeow decides the default (all_member_add)
+		memberAddMode, ok := parseGroupMemberAddMode(t.MemberAddMode, true)
+		if !ok {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("invalid MemberAddMode in Payload, must be admin_add or all_member_add"))
+			return
+		}
+
 		req := whatsmeow.ReqCreateGroup{
-			Name:         t.Name,
-			Participants: participantJIDs,
+			Name:          t.Name,
+			Participants:  participantJIDs,
+			MemberAddMode: memberAddMode,
 		}
 
 		groupInfo, err := clientManager.GetWhatsmeowClient(txtid).CreateGroup(r.Context(), req)
@@ -4932,7 +4941,7 @@ func (s *server) CreateGroup() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to create group")
 			msg := fmt.Sprintf("failed to create group: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -4984,11 +4993,84 @@ func (s *server) SetGroupLocked() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set group locked")
 			msg := fmt.Sprintf("failed to set group locked: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
 		response := map[string]interface{}{"Details": "Group Locked setting updated successfully"}
+		responseJson, err := json.Marshal(response)
+
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, err)
+		} else {
+			s.Respond(w, r, http.StatusOK, string(responseJson))
+		}
+
+		return
+	}
+}
+
+// parseGroupMemberAddMode validates a member add mode coming from a payload.
+// An empty value is only accepted when allowEmpty is true, and means "not set".
+func parseGroupMemberAddMode(mode string, allowEmpty bool) (types.GroupMemberAddMode, bool) {
+	switch types.GroupMemberAddMode(mode) {
+	case types.GroupMemberAddModeAdmin, types.GroupMemberAddModeAllMember:
+		return types.GroupMemberAddMode(mode), true
+	case "":
+		return "", allowEmpty
+	default:
+		return "", false
+	}
+}
+
+// Set group member add mode (who can add participants)
+func (s *server) SetGroupMemberAddMode() http.HandlerFunc {
+
+	type setGroupMemberAddModeStruct struct {
+		GroupJID string `json:"groupjid"`
+		Mode     string `json:"mode"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+
+		client := clientManager.GetWhatsmeowClient(txtid)
+		if client == nil {
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("no session"))
+			return
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		var t setGroupMemberAddModeStruct
+		err := decoder.Decode(&t)
+		if err != nil {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode Payload"))
+			return
+		}
+
+		group, ok := parseJID(t.GroupJID)
+		if !ok {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("could not parse Group JID"))
+			return
+		}
+
+		mode, ok := parseGroupMemberAddMode(t.Mode, false)
+		if !ok {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("invalid Mode in Payload, must be admin_add or all_member_add"))
+			return
+		}
+
+		err = client.SetGroupMemberAddMode(r.Context(), group, mode)
+
+		if err != nil {
+			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set group member add mode")
+			msg := fmt.Sprintf("failed to set group member add mode: %v", err)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
+			return
+		}
+
+		response := map[string]interface{}{"Details": "Group member add mode updated successfully"}
 		responseJson, err := json.Marshal(response)
 
 		if err != nil {
@@ -5057,7 +5139,7 @@ func (s *server) SetDisappearingTimer() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set disappearing timer")
 			msg := fmt.Sprintf("failed to set disappearing timer: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5109,7 +5191,7 @@ func (s *server) RemoveGroupPhoto() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to remove group photo")
 			msg := fmt.Sprintf("failed to remove group photo: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5200,7 +5282,7 @@ func (s *server) UpdateGroupParticipants() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to change participant group")
 			msg := fmt.Sprintf("failed to change participant group: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5251,7 +5333,7 @@ func (s *server) GetGroupInviteInfo() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to get group invite info")
 			msg := fmt.Sprintf("failed to get group invite info: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5336,7 +5418,7 @@ func (s *server) SetGroupPhoto() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set group photo")
 			msg := fmt.Sprintf("failed to set group photo: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5394,7 +5476,7 @@ func (s *server) SetGroupName() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set group name")
 			msg := fmt.Sprintf("failed to set group name: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5452,7 +5534,7 @@ func (s *server) SetGroupTopic() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set group topic")
 			msg := fmt.Sprintf("failed to set group topic: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5504,7 +5586,7 @@ func (s *server) GroupLeave() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to leave group")
 			msg := fmt.Sprintf("failed to leave group: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5557,7 +5639,7 @@ func (s *server) SetGroupAnnounce() http.HandlerFunc {
 		if err != nil {
 			log.Error().Str("error", fmt.Sprintf("%v", err)).Msg("failed to set group announce")
 			msg := fmt.Sprintf("failed to set group announce: %v", err)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5595,7 +5677,7 @@ func (s *server) ListNewsletter() http.HandlerFunc {
 		if err != nil {
 			msg := fmt.Sprintf("failed to get newsletter list: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5645,7 +5727,7 @@ func (s *server) NewsletterJoin() http.HandlerFunc {
 		if err := client.FollowNewsletter(context.Background(), newsletter); err != nil {
 			msg := fmt.Sprintf("failed to join newsletter: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5682,7 +5764,7 @@ func (s *server) NewsletterLeave() http.HandlerFunc {
 		if err := client.UnfollowNewsletter(context.Background(), newsletter); err != nil {
 			msg := fmt.Sprintf("failed to leave newsletter: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5720,7 +5802,7 @@ func (s *server) NewsletterMute() http.HandlerFunc {
 		if err := client.NewsletterToggleMute(context.Background(), newsletter, t.Mute); err != nil {
 			msg := fmt.Sprintf("failed to change newsletter mute status: %v", err)
 			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, msg)
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
 			return
 		}
 
@@ -5924,8 +6006,7 @@ func (s *server) AddUser() http.HandlerFunc {
 			}
 		}
 
-		log.Info().Interface("proxyConfig", user.ProxyConfig).Interface("s3Config", user.S3Config).Msg("Received values for proxyConfig and s3Config")
-		log.Debug().Interface("user", user).Msg("Received values for user")
+		log.Debug().Bool("proxy_config_provided", user.ProxyConfig != nil).Bool("s3_config_provided", user.S3Config != nil).Msg("Received user configuration")
 
 		// Set defaults only if nil
 		if user.Events == "" {
@@ -6125,8 +6206,7 @@ func (s *server) EditUser() http.HandlerFunc {
 			}
 		}
 
-		log.Info().Interface("proxyConfig", user.ProxyConfig).Interface("s3Config", user.S3Config).Msg("Received values for proxyConfig and s3Config")
-		log.Debug().Interface("user", user).Msg("Received values for user")
+		log.Debug().Bool("proxy_config_provided", user.ProxyConfig != nil).Bool("s3_config_provided", user.S3Config != nil).Msg("Received user configuration")
 
 		// Check if user exists
 		var count int
@@ -6452,8 +6532,9 @@ func (s *server) DeleteUserComplete() http.HandlerFunc {
 			// Continue anyway since we have the ID to delete local files
 		}
 
-		// 3. Remove from DB
-		_, err = s.db.Exec("DELETE FROM users WHERE id = $1", id)
+		// Delete the user and history atomically. History writers lock the same
+		// user row before inserting, so an in-flight batch cannot recreate rows.
+		err = s.deleteUserAndHistory(id)
 		if err != nil {
 			s.respondWithJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"code":    http.StatusInternalServerError,
@@ -7091,7 +7172,7 @@ func (s *server) GetHistory() http.HandlerFunc {
 		if historyLimit == 0 {
 			// Before returning error, try refreshing the cache in case the DB was updated
 			token := r.Context().Value("userinfo").(Values).Get("Token")
-			log.Info().Str("userId", txtid).Str("token", token).Msg("History is 0, invalidating cache and trying fresh DB lookup")
+			log.Info().Str("userId", txtid).Msg("History is 0, invalidating cache and trying fresh DB lookup")
 			userinfocache.Delete(token)
 
 			// Re-fetch from database
@@ -7231,17 +7312,12 @@ func (s *server) GetHistory() http.HandlerFunc {
 
 // save outgoing message to history
 func (s *server) saveOutgoingMessageToHistory(userID, chatJID, messageID, messageType, textContent, mediaLink string, historyLimit int) {
-	// if historyLimit > 0 {
-	// 	err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", "")
-	// 	if err != nil {
-	// 		log.Error().Err(err).Msg("Failed to save outgoing message to history")
-	// 	} else {
-	// 		err = s.trimMessageHistory(userID, chatJID, historyLimit)
-	// 		if err != nil {
-	// 			log.Error().Err(err).Msg("Failed to trim message history")
-	// 		}
-	// 	}
-	// }
+	if historyLimit > 0 {
+		err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", "")
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to save outgoing message to history")
+		}
+	}
 }
 
 // Configure HMAC
