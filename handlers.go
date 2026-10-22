@@ -7393,21 +7393,21 @@ func (s *server) GetHistory() http.HandlerFunc {
 
 // save outgoing message to history
 func (s *server) saveOutgoingMessageToHistory(userID, chatJID, messageID, messageType, textContent, mediaLink string, historyLimit int, message ...*waE2E.Message) {
-	if historyLimit > 0 {
-		// Keep media download metadata for the web client, using the same
-		// envelope as incoming history, without storing full plaintext media files.
-		dataJSON := ""
-		if len(message) > 0 && message[0] != nil {
-			encoded, err := json.Marshal(map[string]interface{}{"Info": map[string]interface{}{"IsFromMe": true}, "Message": message[0]})
-			if err == nil {
-				dataJSON = string(encoded)
-			}
-		}
-		err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", dataJSON)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to save outgoing message to history")
-		}
-	}
+	// if historyLimit > 0 {
+	// 	// Keep media download metadata for the web client, using the same
+	// 	// envelope as incoming history, without storing full plaintext media files.
+	// 	dataJSON := ""
+	// 	if len(message) > 0 && message[0] != nil {
+	// 		encoded, err := json.Marshal(map[string]interface{}{"Info": map[string]interface{}{"IsFromMe": true}, "Message": message[0]})
+	// 		if err == nil {
+	// 			dataJSON = string(encoded)
+	// 		}
+	// 	}
+	// 	err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", dataJSON)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Msg("Failed to save outgoing message to history")
+	// 	}
+	// }
 }
 
 // Configure HMAC
