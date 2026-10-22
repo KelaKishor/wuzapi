@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/mux"
 	"github.com/nfnt/resize"
@@ -165,7 +166,7 @@ func (s *server) authalice(next http.Handler) http.Handler {
 		events := ""
 		proxy_url := ""
 		qrcode := ""
-		var hasHmac bool // ← Nova variável para status HMAC
+		var hasHmac bool
 
 		// Get token from headers or uri parameters
 		token := r.Header.Get("token")
@@ -1235,7 +1236,7 @@ func (s *server) SendDocument() http.HandlerFunc {
 
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
-		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "document", t.Caption, "", historyLimit)
+		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "document", t.Caption, "", historyLimit, msg)
 
 		// Publish sent message event to RabbitMQ
 		token := r.Context().Value("userinfo").(Values).Get("Token")
@@ -1417,7 +1418,7 @@ func (s *server) SendAudio() http.HandlerFunc {
 
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
-		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "audio", "", "", historyLimit)
+		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "audio", "", "", historyLimit, msg)
 
 		token := r.Context().Value("userinfo").(Values).Get("Token")
 		userID := r.Context().Value("userinfo").(Values).Get("Id")
@@ -1608,7 +1609,7 @@ func (s *server) SendImage() http.HandlerFunc {
 
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
-		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "image", t.Caption, "", historyLimit)
+		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "image", t.Caption, "", historyLimit, msg)
 
 		// Publish sent message event to RabbitMQ
 		token := r.Context().Value("userinfo").(Values).Get("Token")
@@ -1771,7 +1772,7 @@ func (s *server) SendSticker() http.HandlerFunc {
 
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
-		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "sticker", "", "", historyLimit)
+		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "sticker", "", "", historyLimit, msg)
 
 		// Publish sent message event to RabbitMQ
 		token := r.Context().Value("userinfo").(Values).Get("Token")
@@ -1937,7 +1938,7 @@ func (s *server) SendVideo() http.HandlerFunc {
 
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
-		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "video", t.Caption, "", historyLimit)
+		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "video", t.Caption, "", historyLimit, msg)
 
 		// Publish sent message event to RabbitMQ
 		token := r.Context().Value("userinfo").(Values).Get("Token")
@@ -2206,15 +2207,15 @@ func (s *server) SendLocation() http.HandlerFunc {
 func (s *server) SendButtons() http.HandlerFunc {
 
 	type buttonStruct struct {
-		Type        string `json:"type"`         // "reply" (default) | "cta_url" | "cta_call" | "copy"
-		Title       string `json:"title"`        // Texto do botão (max 20 caracteres)
-		Text        string `json:"text"`         // Fallback para Title
-		ButtonText  string `json:"buttonText"`   // Fallback para Title (legacy)
-		ID          string `json:"id"`           // ID do botão
-		ButtonId    string `json:"buttonId"`     // Fallback para ID
-		URL         string `json:"url"`          // Necessário para cta_url
-		PhoneNumber string `json:"phone_number"` // Necessário para cta_call
-		CopyCode    string `json:"copy_code"`    // Necessário para copy
+		Type        string `json:"type"`       // "reply" (default) | "cta_url" | "cta_call" | "copy"
+		Title       string `json:"title"`      // Button label (max 20 characters)
+		Text        string `json:"text"`       // Fallback for Title
+		ButtonText  string `json:"buttonText"` // Fallback for Title (legacy)
+		ID          string `json:"id"`
+		ButtonId    string `json:"buttonId"`     // Fallback for ID
+		URL         string `json:"url"`          // Required for cta_url
+		PhoneNumber string `json:"phone_number"` // Required for cta_call
+		CopyCode    string `json:"copy_code"`    // Required for copy
 	}
 
 	type sendButtonsStruct struct {
@@ -2245,7 +2246,6 @@ func (s *server) SendButtons() http.HandlerFunc {
 			return
 		}
 
-		// --- Fallbacks e Validações Básicas ---
 		body := strings.TrimSpace(t.Body)
 		if body == "" {
 			body = strings.TrimSpace(t.Text)
@@ -2256,7 +2256,7 @@ func (s *server) SendButtons() http.HandlerFunc {
 			return
 		}
 
-		// --- Parse de Botões para NativeFlow (Interactive) ---
+		// Convert buttons to the interactive native flow format.
 		nativeBtns := make([]*waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton, 0, len(t.Buttons))
 
 		for _, btn := range t.Buttons {
@@ -2271,7 +2271,7 @@ func (s *server) SendButtons() http.HandlerFunc {
 				continue
 			}
 
-			// WhatsApp limita o título a 20 caracteres nos botões
+			// WhatsApp limits button labels to 20 characters.
 			if runes := []rune(title); len(runes) > 20 {
 				title = string(runes[:20])
 			}
@@ -2306,7 +2306,7 @@ func (s *server) SendButtons() http.HandlerFunc {
 				name = "cta_copy"
 				pm = map[string]string{"display_text": title, "copy_code": btn.CopyCode}
 			default:
-				continue // Tipo desconhecido, ignora o botão
+				continue
 			}
 
 			paramsJSON, _ := json.Marshal(pm)
@@ -2321,7 +2321,6 @@ func (s *server) SendButtons() http.HandlerFunc {
 			return
 		}
 
-		// --- Destinatário e Mensagem ID ---
 		recipient, err := validateMessageFields(r.Context(), clientManager.GetWhatsmeowClient(txtid), t.Phone, t.ContextInfo.StanzaID, t.ContextInfo.Participant)
 		if err != nil {
 			s.Respond(w, r, http.StatusBadRequest, err)
@@ -2349,7 +2348,7 @@ func (s *server) SendButtons() http.HandlerFunc {
 			}
 		}
 
-		// --- ContextInfo (Citações/Responder) ---
+		// Preserve reply context, mentions, and forwarding information.
 		var ctxInfo waE2E.ContextInfo
 		if t.ContextInfo.StanzaID != nil {
 			qm := t.QuotedMessage
@@ -2369,7 +2368,6 @@ func (s *server) SendButtons() http.HandlerFunc {
 			ctxInfo.IsForwarded = t.ContextInfo.IsForwarded
 		}
 
-		// --- Construção da InteractiveMessage ---
 		interactiveMsg := &waE2E.InteractiveMessage{
 			Header:      &waE2E.InteractiveMessage_Header{},
 			Body:        &waE2E.InteractiveMessage_Body{Text: proto.String(body)},
@@ -2386,7 +2384,7 @@ func (s *server) SendButtons() http.HandlerFunc {
 			interactiveMsg.Footer = &waE2E.InteractiveMessage_Footer{Text: proto.String(t.Footer)}
 		}
 
-		// Prioridade para Imagem no Header, senão usa Título (Texto)
+		// Prefer the header image over the text title.
 		if imgMsg != nil {
 			interactiveMsg.Header.HasMediaAttachment = proto.Bool(true)
 			interactiveMsg.Header.Media = &waE2E.InteractiveMessage_Header_ImageMessage{ImageMessage: imgMsg}
@@ -2396,7 +2394,7 @@ func (s *server) SendButtons() http.HandlerFunc {
 
 		finalMsg := &waE2E.Message{InteractiveMessage: interactiveMsg}
 
-		// --- Nó BIZ (Fundamental para renderizar os botões) ---
+		// WhatsApp requires these business nodes to render interactive buttons.
 		extraNodes := []waBinary.Node{{
 			Tag: "biz",
 			Content: []waBinary.Node{{
@@ -2409,7 +2407,6 @@ func (s *server) SendButtons() http.HandlerFunc {
 			}},
 		}}
 
-		// --- Envio Final ---
 		resp, err := sendMessageWithRecovery(txtid, client, context.Background(), recipient, finalMsg,
 			whatsmeow.SendRequestExtra{
 				ID:              msgid,
@@ -2422,7 +2419,6 @@ func (s *server) SendButtons() http.HandlerFunc {
 			return
 		}
 
-		// --- Histórico e Eventos ---
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
 		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "buttons", body, "", historyLimit)
@@ -2430,7 +2426,6 @@ func (s *server) SendButtons() http.HandlerFunc {
 		token := r.Context().Value("userinfo").(Values).Get("Token")
 		s.publishSentMessageEvent(token, txtid, txtid, recipient, msgid, finalMsg, resp.Timestamp)
 
-		// --- Resposta HTTP ---
 		responseJSON, _ := json.Marshal(map[string]interface{}{
 			"Details":   "Sent",
 			"Timestamp": resp.Timestamp.Unix(),
@@ -6711,14 +6706,26 @@ func resolveMessageRecipient(ctx context.Context, lidStore messageLIDStore, phon
 	}
 
 	if strings.ContainsRune(phone, '@') {
+		// ParseJID can silently ignore extra @ segments or accept an empty
+		// server. Reject malformed input without restricting existing JID types.
+		if strings.Count(phone, "@") != 1 || strings.IndexFunc(phone, func(r rune) bool {
+			return unicode.IsSpace(r) || unicode.IsControl(r)
+		}) >= 0 {
+			return types.EmptyJID, errors.New("invalid Phone: expected a complete WhatsApp JID")
+		}
 		recipient, ok := parseJID(phone)
-		if !ok {
+		if !ok || recipient.Server == "" {
 			return types.EmptyJID, errors.New("could not parse Phone")
 		}
 		return recipient, nil
 	}
 
 	bareID := strings.TrimPrefix(phone, "+")
+	// Bare identifiers are numeric phone numbers or cached LIDs. Do not turn
+	// usernames or Cloud API BSUIDs into phone-number JIDs.
+	if bareID == "" || strings.IndexFunc(bareID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return types.EmptyJID, errors.New("invalid Phone: use digits with an optional leading +, or a complete WhatsApp JID; usernames and BSUIDs are not supported")
+	}
 	if lidStore == nil {
 		return types.NewJID(bareID, types.DefaultUserServer), nil
 	}
@@ -7385,13 +7392,22 @@ func (s *server) GetHistory() http.HandlerFunc {
 }
 
 // save outgoing message to history
-func (s *server) saveOutgoingMessageToHistory(userID, chatJID, messageID, messageType, textContent, mediaLink string, historyLimit int) {
-	// if historyLimit > 0 {
-	// 	err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", "")
-	// 	if err != nil {
-	// 		log.Error().Err(err).Msg("Failed to save outgoing message to history")
-	// 	}
-	// }
+func (s *server) saveOutgoingMessageToHistory(userID, chatJID, messageID, messageType, textContent, mediaLink string, historyLimit int, message ...*waE2E.Message) {
+	if historyLimit > 0 {
+		// Keep media download metadata for the web client, using the same
+		// envelope as incoming history, without storing full plaintext media files.
+		dataJSON := ""
+		if len(message) > 0 && message[0] != nil {
+			encoded, err := json.Marshal(map[string]interface{}{"Info": map[string]interface{}{"IsFromMe": true}, "Message": message[0]})
+			if err == nil {
+				dataJSON = string(encoded)
+			}
+		}
+		err := s.saveMessageToHistory(userID, chatJID, "me", messageID, messageType, textContent, mediaLink, "", dataJSON)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to save outgoing message to history")
+		}
+	}
 }
 
 // Configure HMAC
@@ -7493,7 +7509,7 @@ func (s *server) GetHmacConfig() http.HandlerFunc {
 func (s *server) DeleteHmacConfig() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		txtid := r.Context().Value("userinfo").(Values).Get("Id")
-		token := r.Context().Value("userinfo").(Values).Get("Token") // ← Pegar o token
+		token := r.Context().Value("userinfo").(Values).Get("Token")
 
 		// Clear HMAC key
 		_, err := s.db.Exec(`UPDATE users SET hmac_key = NULL WHERE id = $1`, txtid)
