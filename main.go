@@ -66,7 +66,8 @@ var (
 	mode                = flag.String("mode", "http", "Server mode: http or stdio")
 	dataDir             = flag.String("datadir", "", "Data directory for database and session files (defaults to executable directory)")
 
-	socketRecoveryEnabled = flag.Bool("socketrecovery", true, "Recover sessions after closed socket send errors")
+	socketRecoveryEnabled   = flag.Bool("socketrecovery", true, "Recover sessions after closed socket send errors")
+	appStateRecoveryEnabled = flag.Bool("appstaterecovery", true, "Recover app state collections that fail to sync (full resync, then a request to the primary device)")
 	allowInternalIPs    = flag.Bool("allowinternal", false, "Allow only localhost/loopback for media download")
 
 	globalHMACKeyEncrypted []byte
@@ -347,6 +348,22 @@ func main() {
 			log.Fatal().Err(err).Msg("Invalid WUZAPI_SOCKET_RECOVERY value")
 		}
 		*socketRecoveryEnabled = enabled
+	}
+
+	if v := os.Getenv("WUZAPI_APPSTATE_RECOVERY"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid WUZAPI_APPSTATE_RECOVERY value")
+		}
+		*appStateRecoveryEnabled = enabled
+	}
+
+	if v := os.Getenv("WUZAPI_APPSTATE_RECOVERY"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid WUZAPI_APPSTATE_RECOVERY value")
+		}
+		*appStateRecoveryEnabled = enabled
 	}
 
 	if v := os.Getenv("WUZAPI_SOCKET_RECOVERY"); v != "" {

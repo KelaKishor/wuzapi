@@ -43,6 +43,8 @@ type MyClient struct {
 	token          string
 	db             *sqlx.DB
 	s              *server
+	// Repairs app state collections that fail to sync; nil in tests that build MyClient by hand.
+	appStateRecovery *appStateRecovery
 }
 
 // safeGo runs fn in a new goroutine with a defer recover so a panic inside
@@ -586,6 +588,7 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 		db:             s.db,
 		s:              s,
 	}
+	mycli.appStateRecovery = newAppStateRecovery(userID, client)
 	mycli.eventHandlerID = mycli.WAClient.AddEventHandler(mycli.myEventHandler)
 
 	// Store the MyClient in clientManager
@@ -848,9 +851,19 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 	switch evt := rawEvt.(type) {
 	case *events.AppStateSyncComplete:
+		if mycli.appStateRecovery != nil {
+			mycli.appStateRecovery.completed(evt)
+		}
 		if len(mycli.WAClient.Store.PushName) > 0 && evt.Name == appstate.WAPatchCriticalBlock {
 			mycli.sendAutomaticPresence()
 		}
+	case *events.AppStateSyncError:
+		if mycli.appStateRecovery == nil {
+			log.Warn().Str("userID", txtid).Str("collection", string(evt.Name)).Bool("fullSync", evt.FullSync).Err(evt.Error).Msg("App state sync failed")
+			break
+		}
+		recovery, ctx := mycli.appStateRecovery, mycli.WAClient.BackgroundEventCtx
+		safeGo("appstate-recovery", func() { recovery.handleError(ctx, evt, time.Now()) })
 	case *events.Connected, *events.PushNameSetting:
 		postmap["type"] = "Connected"
 		dowebhook = 1
@@ -1194,6 +1207,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 					mediaLink,
 					replyToMessageID,
 					string(evtJSON),
+					evt.Info.Timestamp,
 				)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to save message to history")
@@ -1413,8 +1427,12 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 						// Get message timestamp
 						msgTimestamp := time.Now()
+						// sentAt stays zero (stored as NULL) when the sync didn't include a send time,
+						// rather than recording the sync time as the send time.
+						var sentAt time.Time
 						if timestamp := msg.Message.GetMessageTimestamp(); timestamp > 0 {
 							msgTimestamp = time.Unix(int64(timestamp), 0)
+							sentAt = msgTimestamp
 						}
 
 						// Parse sender JID for MessageInfo
@@ -1509,6 +1527,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 								mediaLink,
 								quotedMessageID,
 								string(evtJSON),
+								sentAt,
 							)
 							if err != nil {
 								log.Error().Err(err).

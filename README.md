@@ -220,6 +220,11 @@ DB_SSLMODE=false
 **For SQLite (default):**
 No database configuration needed - SQLite is used by default if no PostgreSQL settings are provided.
 
+All tables are stored in `dbdata/main.db`. Stop older instances before upgrading:
+existing `users.db` tables are migrated automatically on startup. The migration retains
+`users.db` as a pre-migration copy (it is not kept in sync), runs once, and aborts without
+merging data if an object with the same name already exists in `main.db`.
+
 #### Optional Settings
 ```
 TZ=America/New_York
@@ -255,6 +260,22 @@ fallback (enabled by default). The environment variable overrides the flag.
 Explicit disconnect, logout, and user deletion stop recovery. No background
 health polling is added; subsequent send failures can trigger another attempt
 after the cooldown if recovery fails.
+
+### App state recovery
+
+WhatsApp syncs chat settings (unread, mute, archive, pin, star, labels) between
+devices as app state collections. When a collection fails verification (for example
+`mismatching LTHash`), it stays broken and writes to it, such as `/chat/unread` or
+`/chat/archive`, fail with `409 conflict`. WuzAPI now repairs it: after a failed
+incremental sync it runs a full resync of that collection (at most once per hour),
+and if a full sync fails it asks the primary phone for a fresh copy of the
+collection (at most once every six hours). The phone only answers while WhatsApp is
+open on it, so writes can keep failing until then. Each step is logged with the user
+ID and collection. Cooldowns are kept in memory per session and reset when a
+recovery completes.
+
+Set `WUZAPI_APPSTATE_RECOVERY=false` or pass `-appstaterecovery=false` to disable it
+(enabled by default). The environment variable overrides the flag.
 
 ### RabbitMQ Integration
 WuzAPI supports sending WhatsApp events to a RabbitMQ queue for global event distribution. When enabled, all WhatsApp events will be published to the specified queue regardless of individual user webhook configurations.
@@ -710,6 +731,20 @@ The original message stays unchanged. Consumers must apply edits to their target
 use the protocol message's `timestampMS` in `datajson` to order successive edits when
 available, since database timestamps record insertion time, including HistorySync.
 A limited response can include an edit without the original message.
+
+### Message send time
+
+Each `/chat/history` row has two times. `timestamp` is when WuzAPI stored the row, so
+every message from a HistorySync gets the sync time. `sent_at` is when the message was
+sent, as reported by WhatsApp: the message's own timestamp for live and HistorySync
+messages, and the server timestamp of the send response for messages sent through the
+API. It is omitted when unknown, including for rows stored before the field existed.
+Results are still ordered by `timestamp`.
+
+PostgreSQL stores `sent_at` as `TIMESTAMPTZ` to preserve the instant across time
+zones. The upgrade treats existing timezone-less values as UTC, preserving their
+previous API interpretation. Values written by older versions running outside UTC
+may already be shifted; the discarded offset cannot be recovered automatically.
 
 Previously imported `unknown` edits are repaired when redelivered. This does not
 backfill existing history or recover events that WhatsApp does not redeliver.
