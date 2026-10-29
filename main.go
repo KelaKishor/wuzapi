@@ -46,6 +46,7 @@ type server struct {
 
 // Replace the global variables
 var (
+	allowInternalIPs    = flag.Bool("allowinternal", false, "Allow only localhost/loopback for media download")
 	address             = flag.String("address", "0.0.0.0", "Bind IP Address")
 	port                = flag.String("port", "8080", "Listen Port")
 	waDebug             = flag.String("wadebug", "", "Enable whatsmeow debug (INFO or DEBUG)")
@@ -68,7 +69,6 @@ var (
 
 	socketRecoveryEnabled   = flag.Bool("socketrecovery", true, "Recover sessions after closed socket send errors")
 	appStateRecoveryEnabled = flag.Bool("appstaterecovery", true, "Recover app state collections that fail to sync (full resync, then a request to the primary device)")
-	allowInternalIPs    = flag.Bool("allowinternal", false, "Allow only localhost/loopback for media download")
 
 	globalHMACKeyEncrypted []byte
 	automaticPresence      = types.PresenceAvailable
@@ -342,36 +342,20 @@ func main() {
 	automaticPresence = configuredPresence
 	log.Info().Str("presence", string(automaticPresence)).Msg("Automatic session presence configured")
 
-	if v := os.Getenv("WUZAPI_SOCKET_RECOVERY"); v != "" {
+	if v := os.Getenv("TTWA_SOCKET_RECOVERY"); v != "" {
 		enabled, err := strconv.ParseBool(v)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Invalid WUZAPI_SOCKET_RECOVERY value")
+			log.Fatal().Err(err).Msg("Invalid TTWA_SOCKET_RECOVERY value")
 		}
 		*socketRecoveryEnabled = enabled
 	}
 
-	if v := os.Getenv("WUZAPI_APPSTATE_RECOVERY"); v != "" {
+	if v := os.Getenv("TTWA_APPSTATE_RECOVERY"); v != "" {
 		enabled, err := strconv.ParseBool(v)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Invalid WUZAPI_APPSTATE_RECOVERY value")
+			log.Fatal().Err(err).Msg("Invalid TTWA_APPSTATE_RECOVERY value")
 		}
 		*appStateRecoveryEnabled = enabled
-	}
-
-	if v := os.Getenv("WUZAPI_APPSTATE_RECOVERY"); v != "" {
-		enabled, err := strconv.ParseBool(v)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Invalid WUZAPI_APPSTATE_RECOVERY value")
-		}
-		*appStateRecoveryEnabled = enabled
-	}
-
-	if v := os.Getenv("WUZAPI_SOCKET_RECOVERY"); v != "" {
-		enabled, err := strconv.ParseBool(v)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Invalid WUZAPI_SOCKET_RECOVERY value")
-		}
-		*socketRecoveryEnabled = enabled
 	}
 
 	if v := os.Getenv("TTWA_PROXY_POOL_FALLBACK"); v != "" {
@@ -459,7 +443,7 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*adminToken = string(b)
-			log.Warn().Msg("No admin token provided, generated a temporary random one. Set WUZAPI_ADMIN_TOKEN or -admintoken to configure admin access.")
+			log.Warn().Msg("No admin token provided, generated a temporary random one. Set TTWA_ADMIN_TOKEN or -admintoken to configure admin access.")
 		}
 	}
 
@@ -475,8 +459,8 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*globalEncryptionKey = string(b)
-			log.Warn().Msg("No WUZAPI_GLOBAL_ENCRYPTION_KEY provided, generated a temporary random one. " +
-				"Configure a persistent WUZAPI_GLOBAL_ENCRYPTION_KEY before storing encrypted data; data encrypted with this temporary key cannot be recovered after restart.")
+			log.Warn().Msg("No TTWA_GLOBAL_ENCRYPTION_KEY provided, generated a temporary random one. " +
+				"Configure a persistent TTWA_GLOBAL_ENCRYPTION_KEY before storing encrypted data; data encrypted with this temporary key cannot be recovered after restart.")
 		}
 	}
 
@@ -503,7 +487,7 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*globalHMACKey = string(b)
-			log.Warn().Msg("No WUZAPI_GLOBAL_HMAC_KEY provided, generated a temporary random one. Set WUZAPI_GLOBAL_HMAC_KEY to configure webhook signature verification.")
+			log.Warn().Msg("No TTWA_GLOBAL_HMAC_KEY provided, generated a temporary random one. Set TTWA_GLOBAL_HMAC_KEY to configure webhook signature verification.")
 		}
 
 	} else {
