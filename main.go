@@ -352,19 +352,10 @@ func main() {
 	automaticPresence = configuredPresence
 	log.Info().Str("presence", string(automaticPresence)).Msg("Automatic session presence configured")
 
-	if v := os.Getenv("WUZAPI_HISTORY_TRIM_INTERVAL"); v != "" {
+	if v := os.Getenv("TTWA_HISTORY_TRIM_INTERVAL"); v != "" {
 		interval, err := strconv.ParseUint(v, 10, 64)
 		if err != nil || interval == 0 {
-			log.Fatal().Str("value", v).Msg("Invalid WUZAPI_HISTORY_TRIM_INTERVAL value")
-		}
-		historyTrimInterval = interval
-		log.Info().Uint64("interval", interval).Msg("History trim interval configured")
-	}
-
-	if v := os.Getenv("WUZAPI_HISTORY_TRIM_INTERVAL"); v != "" {
-		interval, err := strconv.ParseUint(v, 10, 64)
-		if err != nil || interval == 0 {
-			log.Fatal().Str("value", v).Msg("Invalid WUZAPI_HISTORY_TRIM_INTERVAL value")
+			log.Fatal().Str("value", v).Msg("Invalid TTWA_HISTORY_TRIM_INTERVAL value")
 		}
 		historyTrimInterval = interval
 		log.Info().Uint64("interval", interval).Msg("History trim interval configured")
