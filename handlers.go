@@ -2929,12 +2929,28 @@ func (s *server) SendMessage() http.HandlerFunc {
 	}
 }
 
+// pollSelectableCount returns how many options a poll's voters may pick:
+// 1 when not given (single answer), otherwise 0 (any number) up to the
+// number of options.
+func pollSelectableCount(count *int, options int) (int, error) {
+	if count == nil {
+		return 1, nil
+	}
+	if *count < 0 || *count > options {
+		return 0, fmt.Errorf("SelectableCount must be between 0 (any number) and the number of options (%d)", options)
+	}
+	return *count, nil
+}
+
 func (s *server) SendPoll() http.HandlerFunc {
 	type pollRequest struct {
 		Group   string   `json:"group"`   // The recipient's group id (120363313346913103@g.us)
 		Header  string   `json:"header"`  // The poll's headline text
 		Options []string `json:"options"` // The list of poll options
-		Id      string
+		// How many options each voter may pick: 1 (the default) for a single
+		// answer, 0 for any number, or up to the number of options
+		SelectableCount *int `json:"selectableCount"`
+		Id              string
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -2971,6 +2987,12 @@ func (s *server) SendPoll() http.HandlerFunc {
 			return
 		}
 
+		selectable, err := pollSelectableCount(req.SelectableCount, len(req.Options))
+		if err != nil {
+			s.Respond(w, r, http.StatusBadRequest, err)
+			return
+		}
+
 		if req.Id == "" {
 			msgid = clientManager.GetWhatsmeowClient(txtid).GenerateMessageID()
 		} else {
@@ -2983,7 +3005,7 @@ func (s *server) SendPoll() http.HandlerFunc {
 			return
 		}
 
-		pollMessage := clientManager.GetWhatsmeowClient(txtid).BuildPollCreation(req.Header, req.Options, 1)
+		pollMessage := clientManager.GetWhatsmeowClient(txtid).BuildPollCreation(req.Header, req.Options, selectable)
 		resp, err = sendMessageWithRecovery(txtid, clientManager.GetWhatsmeowClient(txtid), context.Background(), recipient, pollMessage, whatsmeow.SendRequestExtra{ID: msgid})
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("failed to send poll: %v", err)))
@@ -2993,6 +3015,11 @@ func (s *server) SendPoll() http.HandlerFunc {
 		// Remember the plaintext options so incoming vote webhooks can
 		// resolve the hashed selections back to readable strings.
 		clientManager.SetPollOptions(txtid, msgid, req.Options)
+
+		// Store the sent poll like every other send, so it shows in the chat history
+		historyStr := r.Context().Value("userinfo").(Values).Get("History")
+		historyLimit, _ := strconv.Atoi(historyStr)
+		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "poll", req.Header, "", resp.Timestamp, historyLimit, pollMessage)
 
 		// Publish sent message event to RabbitMQ
 		token := r.Context().Value("userinfo").(Values).Get("Token")
