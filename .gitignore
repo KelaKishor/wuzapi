@@ -5,6 +5,7 @@ wuzapi
 .tool-versions
 ttwa.exe
 TTWA.exe
+ttwa-debug.exe
 wuzapi.exe
 ttwa
 TTWA

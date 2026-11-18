@@ -40,6 +40,15 @@ elseif ($target -eq "mac-all") {
     Write-Host "Dono binaries ban gayi. Universal banane ke liye Mac pe lipo chala:" -ForegroundColor Yellow
     Write-Host "  lipo -create -output ttwa ttwa-mac-intel ttwa-mac-arm64" -ForegroundColor Yellow
 }
+elseif ($target -eq "win-debug") {
+    # Console wala Windows build, error dekhne ke liye (-H=windowsgui nahi)
+    $env:GOOS = "windows"
+    $env:GOARCH = "amd64"
+    $env:CGO_ENABLED = "0"
+    Write-Host "Building for WINDOWS (DEBUG, console mode)..." -ForegroundColor Red
+    go-winres make .
+    go build -ldflags="-s -w" -o ttwa-debug.exe .
+}
 else {
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"
